@@ -5,204 +5,78 @@
 <title>Retro TV — Host</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-  body { font-family: system-ui, sans-serif; padding:20px; max-width:900px; }
+  body { font-family: system-ui,sans-serif; padding:20px; max-width:900px; }
   h1 { margin-top:0; }
-  input[type="file"]{ width:100%; }
+  input[type=file]{ width:100%; }
   button { padding:10px 14px; font-size:15px; margin-top:10px; }
   textarea { width:100%; height:200px; font-family:monospace; margin-top:8px; box-sizing:border-box; }
-  #small { font-size:13px; color:#444; margin-top:8px; }
   #log { font-family:monospace; font-size:12px; color:#333; margin-top:8px; white-space:pre-wrap; }
 </style>
 </head>
 <body>
-  <h1>Retro TV — Host</h1>
+<h1>Retro TV — Host</h1>
 
-  <label>Select a video file to broadcast (one file):</label>
-  <input id="fileInput" type="file" accept="video/*">
+<label>Select a video file to broadcast (one file):</label>
+<input id="fileInput" type="file" accept="video/*">
 
-  <div id="small">Workflow: 1) Click <b>Create Offer</b>. 2) Copy offer text into the client. 3) Paste client's answer below and click <b>Set Remote Answer</b>. Then press <b>Broadcast</b>.</div>
+<div style="margin-top:12px;">
+  <button id="createOffer">Create Offer</button>
+  <button id="broadcast" disabled>Broadcast</button>
+</div>
 
-  <div style="margin-top:12px;">
-    <button id="createOffer">Create Offer</button>
-    <button id="broadcast" disabled>Broadcast</button>
-  </div>
-
-  <h3>Local SDP (offer)</h3>
-  <textarea id="localSDP" readonly placeholder="Create offer to populate this box"></textarea>
-
-  <h3>Paste remote SDP (answer) from client here:</h3>
-  <textarea id="remoteSDP" placeholder="Paste answer SDP here"></textarea>
-  <div style="margin-top:8px;">
-    <button id="setRemote">Set Remote Answer</button>
-  </div>
-
-  <div id="log"></div>
+<div id="log"></div>
 
 <script>
 (async function(){
-  const CHUNK = 64 * 1024; // 64KB
-  const pc = new RTCPeerConnection({ bundlePolicy: 'max-bundle' });
+  const CHUNK = 64*1024; // 64KB
+  const fileInput = document.getElementById('fileInput');
+  const createBtn = document.getElementById('createOffer');
+  const broadcastBtn = document.getElementById('broadcast');
+  const logEl = document.getElementById('log');
+  function log(...args){ logEl.textContent += args.join(' ') + '\n'; }
+
+  // BroadcastChannel for signaling
+  const channel = new BroadcastChannel('retrotv-signal');
+
+  const pc = new RTCPeerConnection({ bundlePolicy:'max-bundle' });
   let dc = null;
 
-  const localSDP = document.getElementById('localSDP');
-  const remoteSDP = document.getElementById('remoteSDP');
-  const createOfferBtn = document.getElementById('createOffer');
-  const broadcastBtn = document.getElementById('broadcast');
-  const fileInput = document.getElementById('fileInput');
-  const logEl = document.getElementById('log');
-
-  function log(...args){ logEl.textContent += args.map(String).join(' ') + '\n'; }
-
-  // Create data channel on host (sender)
-  function setupDataChannel() {
+  // Create offer and DataChannel
+  createBtn.addEventListener('click', async ()=>{
     dc = pc.createDataChannel('tv');
     dc.binaryType = 'arraybuffer';
-    dc.onopen = () => {
-      log('DataChannel open');
-      broadcastBtn.disabled = false;
-    };
-    dc.onclose = () => {
-      log('DataChannel closed');
-      broadcastBtn.disabled = true;
-    };
-    dc.onerror = (e) => log('DataChannel error: ', e && e.message ? e.message : e);
-  }
-
-  // Wait for ICE gathering to finish, with timeout
-  function waitForIceComplete(timeoutMs = 10000){
-    return new Promise(resolve => {
-      if(pc.iceGatheringState === 'complete') return resolve();
-      const t = setTimeout(()=> resolve(), timeoutMs);
-      pc.onicegatheringstatechange = () => {
-        if(pc.iceGatheringState === 'complete'){ clearTimeout(t); resolve(); }
-      };
-    });
-  }
-
-  // Sanitizers: try light first, then stronger if needed
-  function sanitizeLight(sdp){
-    return sdp.split(/\r?\n/).filter(line => {
-      const t = line.trim();
-      if (!t) return true;
-      if (t.startsWith('a=max-message-size')) return false;
-      if (t.startsWith('a=sctp-port')) return false;
-      return true;
-    }).join('\r\n');
-  }
-
-  function sanitizeAggressive(sdp){
-    // remove any a= lines containing common problematic tokens
-    return sdp.split(/\r?\n/).filter(line => {
-      const t = line.trim().toLowerCase();
-      if (!t) return true;
-      if (t.startsWith('a=max-message-size')) return false;
-      if (t.startsWith('a=sctp-port')) return false;
-      if (t.includes('sctp')) return false;           // aggressive: drop a-lines with 'sctp'
-      if (t.includes('ice-options:trickle')) return false;
-      return true;
-    }).join('\r\n');
-  }
-
-  // Create offer (user copies this to client)
-  createOfferBtn.addEventListener('click', async () => {
-    try {
-      // Reset any previous DC/PC state by creating a fresh data channel (if needed)
-      setupDataChannel();
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
-      await waitForIceComplete(10000);
-
-      localSDP.value = pc.localDescription.sdp;
-      try { await navigator.clipboard.writeText(localSDP.value); log('Offer copied to clipboard (if allowed)'); } catch(e){}
-      alert('Offer created. Copy the contents of the Local SDP box and paste it into the client.');
-      log('Offer created.');
-    } catch (err) {
-      log('Error creating offer: ', err && err.message ? err.message : String(err));
-      alert('Error creating offer: ' + String(err));
-    }
+    dc.onopen = ()=> { log('DataChannel open'); broadcastBtn.disabled = false; };
+    dc.onclose = ()=> { log('DataChannel closed'); broadcastBtn.disabled = true; };
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    log('Offer created. Sending to client via BroadcastChannel...');
+    channel.postMessage({ type:'offer', sdp:pc.localDescription.sdp });
   });
 
-  // Helper: try to set remote description with progressive sanitization
-  async function trySetRemoteDescriptionWithSanitizers(type, sdp){
-    // 1) try raw
-    try {
-      await pc.setRemoteDescription({ type, sdp });
-      return;
-    } catch (err) {
-      log('Remote parse failed (raw):', err && err.message ? err.message : String(err));
-      // continue
+  // Receive answer from client
+  channel.onmessage = async (ev)=>{
+    const msg = ev.data;
+    if(msg.type==='answer'){
+      await pc.setRemoteDescription({ type:'answer', sdp: msg.sdp });
+      log('Remote description set. Ready to broadcast.');
     }
-    // 2) light sanitize
-    const sdpLight = sanitizeLight(sdp);
-    if (sdpLight !== sdp) {
-      try {
-        await pc.setRemoteDescription({ type, sdp: sdpLight });
-        log('Remote accepted after light sanitization.');
-        return;
-      } catch (err) {
-        log('Remote parse failed (light):', err && err.message ? err.message : String(err));
-      }
-    }
-    // 3) aggressive sanitize
-    const sdpAgg = sanitizeAggressive(sdp);
-    if (sdpAgg !== sdpLight) {
-      try {
-        await pc.setRemoteDescription({ type, sdp: sdpAgg });
-        log('Remote accepted after aggressive sanitization.');
-        return;
-      } catch (err) {
-        log('Remote parse failed (aggressive):', err && err.message ? err.message : String(err));
-      }
-    }
-    // 4) give up
-    throw new Error('Could not parse remote SDP after sanitization attempts.');
-  }
+  };
 
-  // Set remote answer (paste from client)
-  document.getElementById('setRemote').addEventListener('click', async () => {
-    const raw = remoteSDP.value.trim();
-    if (!raw) return alert('Paste the client answer SDP first.');
-    try {
-      await trySetRemoteDescriptionWithSanitizers('answer', raw);
-      alert('Remote description set. If DataChannel opens, Broadcast will enable.');
-      log('Remote description successfully set.');
-    } catch (err) {
-      const msg = err && err.message ? err.message : String(err);
-      log('Failed to set remote description: ' + msg);
-      alert('Failed to set remote description: ' + msg);
-    }
-  });
-
-  // Broadcast file over data channel in chunks
-  broadcastBtn.addEventListener('click', async () => {
-    if (!dc || dc.readyState !== 'open') return alert('DataChannel not open. Ensure pairing completed and client is connected.');
+  // Broadcast file in chunks
+  broadcastBtn.addEventListener('click', async ()=>{
+    if(!dc || dc.readyState!=='open') return alert('DataChannel not open.');
     const file = fileInput.files[0];
-    if (!file) return alert('Choose a video file first.');
-    try {
-      dc.send(JSON.stringify({ name: file.name, size: file.size, type: file.type || 'video/mp4' }));
-      for (let offset = 0; offset < file.size; offset += CHUNK) {
-        const slice = file.slice(offset, Math.min(offset + CHUNK, file.size));
-        const ab = await slice.arrayBuffer();
-        dc.send(ab);
-        // backpressure
-        while (dc.bufferedAmount > CHUNK * 6) {
-          await new Promise(r => setTimeout(r, 40));
-        }
-      }
-      dc.send(JSON.stringify({ end: true }));
-      alert('Broadcast complete.');
-      log('Broadcast finished.');
-    } catch (err) {
-      log('Broadcast error: ' + (err && err.message ? err.message : String(err)));
-      alert('Broadcast error: ' + String(err));
+    if(!file) return alert('Select a video file first.');
+    log('Broadcasting file:', file.name, file.size, 'bytes');
+    dc.send(JSON.stringify({ name:file.name, size:file.size, type:file.type||'video/mp4' }));
+    for(let offset=0; offset<file.size; offset+=CHUNK){
+      const slice = file.slice(offset, Math.min(offset+CHUNK,file.size));
+      dc.send(await slice.arrayBuffer());
+      while(dc.bufferedAmount > CHUNK*6) await new Promise(r=>setTimeout(r,40));
     }
-  });
-
-  // Clean up on unload
-  window.addEventListener('beforeunload', () => {
-    try { pc.close(); } catch(e){}
+    dc.send(JSON.stringify({ end:true }));
+    log('Broadcast complete.');
+    alert('Broadcast complete.');
   });
 
 })();
