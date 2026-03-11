@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SWG-TV — Broadcast Control</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=BBC+Reith+Serif:ital,wght@0,400;0,700;1,400&family=Helvetica+Neue:wght@300;400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,700;1,8..60,400&family=DM+Sans:wght@300;400;500&display=swap');
+
+:root {
+  --bbc-black: #000000;
+  --bbc-white: #ffffff;
+  --bbc-red: #bb1919;
+  --bbc-red-dark: #8b0000;
+  --bbc-grey: #404040;
+  --bbc-mid: #686868;
+  --bbc-light: #f1f1f1;
+  --bbc-bg: #1a1a1a;
+  --bbc-panel: #242424;
+  --bbc-border: #333333;
+  --bbc-live: #bb1919;
+  --font-head: 'Source Serif 4', Georgia, serif;
+  --font-body: 'DM Sans', Helvetica, sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+
+body {
+  background: var(--bbc-bg);
+  color: var(--bbc-white);
+  font-family: var(--font-body);
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── TOP NAV ── */
+.topnav {
+  background: var(--bbc-black);
+  height: 52px;
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  gap: 0;
+  flex-shrink: 0;
+  border-bottom: 3px solid var(--bbc-red);
+}
+
+.bbc-logo {
+  display: flex;
+  gap: 2px;
+  margin-right: 20px;
+}
+.bbc-block {
+  width: 30px; height: 30px;
+  background: var(--bbc-white);
+  color: var(--bbc-black);
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 17px;
+  display: flex; align-items: center; justify-content: center;
+  letter-spacing: -1px;
+  border-radius: 2px;
+}
+
+.nav-title {
+  font-family: var(--font-head);
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--bbc-white);
+  letter-spacing: 0.5px;
+}
+.nav-title span {
+  color: var(--bbc-red);
+}
+
+.nav-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.live-badge {
+  background: var(--bbc-red);
+  color: white;
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 0.65rem;
+  letter-spacing: 2px;
+  padding: 3px 8px;
+  border-radius: 2px;
+  display: none;
+  align-items: center;
+  gap: 5px;
+}
+.live-badge.show { display: flex; }
+.live-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #fff;
+  animation: blink 1s step-end infinite;
+}
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+.viewer-count {
+  font-size: 0.7rem;
+  color: var(--bbc-mid);
+  font-family: var(--font-body);
+}
+#viewer-num { color: var(--bbc-white); font-weight: 500; }
+
+#clock {
+  font-family: var(--font-body);
+  font-weight: 300;
+  font-size: 0.85rem;
+  color: #aaa;
+  letter-spacing: 1px;
+}
+
+/* ── MAIN LAYOUT ── */
+.studio {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── PREVIEW MONITOR ── */
+.preview-col {
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  gap: 10px;
+  background: #111;
+  min-height: 0;
+}
+
+.monitor-label {
+  font-family: var(--font-body);
+  font-size: 0.65rem;
+  font-weight: 500;
+  letter-spacing: 2.5px;
+  color: var(--bbc-mid);
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.monitor-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--bbc-border);
+}
+
+.monitor-frame {
+  flex: 1;
+  min-height: 0;
+  background: #000;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid #2a2a2a;
+}
+
+/* Scanlines */
+.monitor-frame::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.06) 2px, rgba(0,0,0,0.06) 4px);
+  pointer-events: none;
+  z-index: 30;
+}
+
+#output-stage {
+  position: relative;
+  width: 100%; height: 100%;
+}
+
+/* ── LAYERS ── */
+.layer {
+  position: absolute; inset: 0;
+  opacity: 0;
+  transition: opacity 1.2s ease;
+  pointer-events: none;
+}
+.layer.visible { opacity: 1; }
+
+/* ── VIDEO LAYER ── */
+#video-layer video {
+  width: 100%; height: 100%;
+  object-fit: contain;
+  background: #000;
+  display: block;
+}
+
+/* ── TEST CARD ── */
+#testcard-layer { background: #000; }
+.testcard { width: 100%; height: 100%; display: flex; flex-direction: column; }
+.tc-bars { display: flex; flex: 2; }
+.tc-bar { flex: 1; }
+.tc-bar:nth-child(1){background:#c8c8c8}
+.tc-bar:nth-child(2){background:#c8c800}
+.tc-bar:nth-child(3){background:#00c8c8}
+.tc-bar:nth-child(4){background:#00c800}
+.tc-bar:nth-child(5){background:#c800c8}
+.tc-bar:nth-child(6){background:#c80000}
+.tc-bar:nth-child(7){background:#0000c8}
+.tc-bar:nth-child(8){background:#000000}
+.tc-bottom { display:flex; flex:1; }
+.tc-b1{display:flex;flex:3}
+.tc-b1 div{flex:1}
+.tc-b1 div:nth-child(1){background:#0000c8}
+.tc-b1 div:nth-child(2){background:#f0f0f0}
+.tc-b1 div:nth-child(3){background:#c800c8}
+.tc-b1 div:nth-child(4){background:#101010}
+.tc-b1 div:nth-child(5){background:#101010}
+.tc-b1 div:nth-child(6){background:#101010}
+.tc-b2{flex:1;display:flex;flex-direction:column}
+.tc-b2 div:nth-child(1){flex:1;background:#101010}
+.tc-b2 div:nth-child(2){flex:2;background:#f0f0f0}
+.tc-b2 div:nth-child(3){flex:1;background:#101010}
+.tc-b3{flex:1;display:flex}
+.tc-b3 div:nth-child(1){flex:1;background:#101010}
+.tc-b3 div:nth-child(2){flex:2;background:#282828}
+.tc-b3 div:nth-child(3){flex:1;background:#101010}
+.tc-overlay {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.tc-circle {
+  width: 32%; aspect-ratio: 1;
+  border-radius: 50%;
+  background: #eee;
+  border: 3px solid #000;
+  display: flex; align-items: center; justify-content: center;
+  flex-direction: column; gap: 4px;
+  position: relative;
+}
+.tc-cross-h { position:absolute;top:50%;left:5%;right:5%;height:1px;background:rgba(0,0,0,0.5); }
+.tc-cross-v { position:absolute;left:50%;top:5%;bottom:5%;width:1px;background:rgba(0,0,0,0.5); }
+.tc-inner-circle {
+  width: 68%; aspect-ratio: 1; border-radius: 50%;
+  background: #fff; border: 1.5px solid #444;
+  display: flex; align-items: center; justify-content: center; flex-direction: column;
+}
+.tc-name { font-family: var(--font-body); font-weight: 700; font-size: clamp(7px,1.5vw,16px); color: #000; letter-spacing: 2px; }
+.tc-sub { font-family: var(--font-body); font-size: clamp(4px,0.6vw,8px); color: #555; letter-spacing: 1px; }
+
+/* ── FAULT ── */
+#fault-layer {
+  background: #000;
+  display: flex; align-items: center; justify-content: center;
+  flex-direction: column; gap: 20px;
+}
+.fault-grid {
+  position: absolute; inset: 0;
+  background-image: linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+.fault-content { position: relative; z-index: 1; text-align: center; }
+.fault-warn { font-size: clamp(24px,5vw,56px); margin-bottom: 16px; }
+.fault-line { width: 50%; height: 1px; background: rgba(255,255,255,0.15); margin: 0 auto 20px; }
+.fault-text {
+  font-family: var(--font-head);
+  font-weight: 400;
+  font-size: clamp(12px,2.2vw,26px);
+  color: #d0d0d0;
+  line-height: 1.7;
+  letter-spacing: 2px;
+}
+.fault-branding {
+  font-family: var(--font-body);
+  font-size: clamp(8px,1vw,12px);
+  letter-spacing: 4px;
+  color: #444;
+  margin-top: 12px;
+  text-transform: uppercase;
+}
+
+/* ── SUSPENDED ── */
+#suspended-layer {
+  background: #000;
+  display: flex; align-items: center; justify-content: center;
+}
+.susp-bg {
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse at 50% 40%, #0d1826 0%, #000 65%);
+}
+.susp-content {
+  position: relative; z-index: 1;
+  text-align: center;
+  display: flex; flex-direction: column; align-items: center;
+  gap: 16px;
+}
+.susp-logo-wrap {
+  display: flex; gap: 3px; margin-bottom: 4px;
+}
+.susp-block {
+  width: clamp(24px,4vw,44px); height: clamp(24px,4vw,44px);
+  background: var(--bbc-white);
+  color: var(--bbc-black);
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: clamp(12px,2vw,22px);
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 2px;
+}
+.susp-channel {
+  font-family: var(--font-head);
+  font-weight: 700;
+  font-size: clamp(14px,2.5vw,28px);
+  letter-spacing: 6px;
+  color: #fff;
+}
+.susp-divider { width: 80px; height: 1px; background: rgba(255,255,255,0.2); }
+.susp-msg {
+  font-family: var(--font-head);
+  font-weight: 300;
+  font-style: italic;
+  font-size: clamp(10px,1.8vw,20px);
+  color: #aaa;
+  letter-spacing: 1px;
+}
+.susp-time {
+  font-family: var(--font-body);
+  font-size: clamp(10px,1.5vw,16px);
+  color: rgba(255,255,255,0.35);
+  letter-spacing: 3px;
+  margin-top: 4px;
+  animation: fadepulse 3s ease-in-out infinite;
+}
+@keyframes fadepulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+/* ── IDENT ── */
+#ident-layer { background: #000; overflow: hidden; }
+#ident-canvas { width: 100%; height: 100%; display: block; }
+
+/* ── BOTTOM STATUS ── */
+.monitor-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.65rem;
+  color: var(--bbc-mid);
+  letter-spacing: 1px;
+  font-family: var(--font-body);
+  flex-shrink: 0;
+}
+.ms-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: #333;
+}
+.ms-dot.live { background: var(--bbc-red); box-shadow: 0 0 6px var(--bbc-red); }
+#current-label { color: var(--bbc-white); font-weight: 500; }
+
+/* ── CONTROL PANEL ── */
+.control-panel {
+  background: var(--bbc-panel);
+  border-left: 1px solid var(--bbc-border);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.cp-section {
+  padding: 16px;
+  border-bottom: 1px solid var(--bbc-border);
+}
+.cp-section:last-child { border-bottom: none; }
+
+.cp-heading {
+  font-family: var(--font-body);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 2.5px;
+  color: var(--bbc-mid);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--bbc-border);
+}
+
+/* Go Live button */
+.btn-golive {
+  width: 100%;
+  padding: 12px;
+  background: var(--bbc-red);
+  color: #fff;
+  border: none;
+  border-radius: 2px;
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.15s;
+  display: flex; align-items: center; justify-content: center;
+  gap: 8px;
+}
+.btn-golive:hover { background: #a01515; }
+.btn-golive.live { background: #333; color: #aaa; }
+.btn-golive:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.room-display {
+  margin-top: 10px;
+  background: #111;
+  border: 1px solid var(--bbc-border);
+  border-radius: 2px;
+  padding: 10px 12px;
+  display: none;
+}
+.room-display.show { display: block; }
+.room-label { font-size: 0.6rem; color: var(--bbc-mid); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 4px; }
+.room-id {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: var(--bbc-white);
+  letter-spacing: 4px;
+  text-align: center;
+  padding: 4px 0;
+}
+.room-hint { font-size: 0.6rem; color: var(--bbc-mid); margin-top: 6px; text-align: center; line-height: 1.5; }
+.copy-btn {
+  width: 100%; margin-top: 8px;
+  background: #1a1a1a; border: 1px solid #444;
+  color: #aaa; font-family: var(--font-body); font-size: 0.72rem;
+  padding: 6px; cursor: pointer; border-radius: 2px;
+  letter-spacing: 1px; transition: all 0.15s;
+}
+.copy-btn:hover { border-color: #888; color: #fff; }
+
+/* Broadcast buttons */
+.bcast-btn {
+  width: 100%;
+  padding: 10px 12px;
+  background: transparent;
+  border: 1px solid var(--bbc-border);
+  border-left: 3px solid var(--bbc-border);
+  color: #ccc;
+  font-family: var(--font-body);
+  font-size: 0.75rem;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  border-radius: 0 2px 2px 0;
+  transition: all 0.12s;
+  text-align: left;
+  margin-bottom: 6px;
+  display: flex; align-items: center; gap: 8px;
+}
+.bcast-btn:last-child { margin-bottom: 0; }
+.bcast-btn:hover { background: rgba(255,255,255,0.05); border-left-color: #888; color: #fff; }
+.bcast-btn.active { background: rgba(187,25,25,0.1); border-left-color: var(--bbc-red); color: #fff; }
+.bcast-btn.active .bi { background: var(--bbc-red); }
+
+.bi {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #333; flex-shrink: 0; transition: background 0.12s;
+}
+.bcast-btn:hover .bi { background: #666; }
+
+.btn-testcard .bi { background: #c8c800; }
+.btn-testcard.active .bi { background: #ffe000; box-shadow: 0 0 4px #ffe000; }
+.btn-fault.active .bi { background: var(--bbc-red); box-shadow: 0 0 4px var(--bbc-red); }
+.btn-suspended.active .bi { background: #4488ff; box-shadow: 0 0 4px #4488ff; }
+.btn-ident.active .bi { background: #00c8a0; box-shadow: 0 0 4px #00c8a0; }
+.btn-video.active .bi { background: #ff8800; box-shadow: 0 0 4px #ff8800; }
+
+/* Upload */
+.upload-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px dashed var(--bbc-border);
+  padding: 16px 12px;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: border-color 0.15s;
+  margin-bottom: 8px;
+}
+.upload-label:hover { border-color: #ff8800; }
+.upload-label input { display: none; }
+.ul-icon { font-size: 1.4rem; opacity: 0.4; }
+.ul-text { font-size: 0.68rem; color: var(--bbc-mid); text-align: center; line-height: 1.6; }
+.ul-text b { color: #ff8800; display: block; }
+
+.file-chip {
+  display: none;
+  background: rgba(255,136,0,0.1);
+  border: 1px solid rgba(255,136,0,0.3);
+  border-radius: 2px;
+  padding: 6px 10px;
+  font-size: 0.66rem;
+  color: #ff9944;
+  word-break: break-all;
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+.file-chip.show { display: block; }
+
+/* Info rows */
+.info-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 5px 0;
+  border-bottom: 1px solid #1e1e1e;
+  font-size: 0.68rem;
+}
+.info-row:last-child { border-bottom: none; }
+.ir-label { color: var(--bbc-mid); }
+.ir-val { color: var(--bbc-white); font-weight: 500; }
+.ir-val.green { color: #00c85a; }
+.ir-val.red { color: var(--bbc-red); }
+.ir-val.amber { color: #ffaa00; }
+
+/* scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: #111; }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<!-- TOP NAV -->
+<nav class="topnav">
+  <div class="bbc-logo">
+    <div class="bbc-block">S</div>
+    <div class="bbc-block">W</div>
+    <div class="bbc-block">G</div>
+  </div>
+  <div class="nav-title">SWG<span>-TV</span> Broadcast Control</div>
+  <div class="nav-right">
+    <div class="live-badge" id="live-badge"><div class="live-dot"></div>LIVE</div>
+    <div class="viewer-count">Viewers: <span id="viewer-num">0</span></div>
+    <div id="clock">00:00:00</div>
+  </div>
+</nav>
+
+<!-- STUDIO -->
+<div class="studio">
+
+  <!-- MONITOR COLUMN -->
+  <div class="preview-col">
+    <div class="monitor-label">Master Output — SWG-TV</div>
+
+    <div class="monitor-frame">
+      <div id="output-stage">
+
+        <!-- VIDEO -->
+        <div class="layer" id="video-layer">
+          <video id="main-video"></video>
+        </div>
+
+        <!-- TEST CARD -->
+        <div class="layer" id="testcard-layer">
+          <div class="testcard">
+            <div class="tc-bars">
+              <div class="tc-bar"></div><div class="tc-bar"></div>
+              <div class="tc-bar"></div><div class="tc-bar"></div>
+              <div class="tc-bar"></div><div class="tc-bar"></div>
+              <div class="tc-bar"></div><div class="tc-bar"></div>
+            </div>
+            <div class="tc-bottom">
+              <div class="tc-b1"><div></div><div></div><div></div><div></div><div></div><div></div></div>
+              <div class="tc-b2"><div></div><div></div><div></div></div>
+              <div class="tc-b3"><div></div><div></div><div></div></div>
+            </div>
+          </div>
+          <div class="tc-overlay">
+            <div class="tc-circle">
+              <div class="tc-cross-h"></div><div class="tc-cross-v"></div>
+              <div class="tc-inner-circle">
+                <div class="tc-name">SWG-TV</div>
+                <div class="tc-sub">TEST CARD F</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- FAULT -->
+        <div class="layer" id="fault-layer">
+          <div class="fault-grid"></div>
+          <div class="fault-content">
+            <div class="fault-warn">⚠</div>
+            <div class="fault-line"></div>
+            <div class="fault-text">We are sorry for the<br>temporary fault</div>
+            <div class="fault-branding">SWG-TV will return shortly</div>
+          </div>
+        </div>
+
+        <!-- SUSPENDED -->
+        <div class="layer" id="suspended-layer">
+          <div class="susp-bg"></div>
+          <div class="susp-content">
+            <div class="susp-logo-wrap">
+              <div class="susp-block">S</div>
+              <div class="susp-block">W</div>
+              <div class="susp-block">G</div>
+            </div>
+            <div class="susp-channel">SWG-TV</div>
+            <div class="susp-divider"></div>
+            <div class="susp-msg">Normal programming has been suspended</div>
+            <div class="susp-time" id="susp-time">00:00:00</div>
+          </div>
+        </div>
+
+        <!-- IDENT -->
+        <div class="layer" id="ident-layer">
+          <canvas id="ident-canvas"></canvas>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="monitor-status">
+      <div class="ms-dot" id="ms-dot"></div>
+      <span>BROADCAST:</span>
+      <span id="current-label">STANDBY</span>
+    </div>
+  </div>
+
+  <!-- CONTROL PANEL -->
+  <div class="control-panel">
+
+    <!-- GO LIVE -->
+    <div class="cp-section">
+      <div class="cp-heading">Stream</div>
+      <button class="btn-golive" id="btn-golive" onclick="toggleLive()">
+        <span>&#9679;</span> Go Live
+      </button>
+      <div class="room-display" id="room-display">
+        <div class="room-label">Room ID — share with viewers</div>
+        <div class="room-id" id="room-id-text">——</div>
+        <button class="copy-btn" onclick="copyRoomId()">Copy viewer link</button>
+        <div class="room-hint" id="room-hint">Viewers open <b>viewer.html</b> and enter this code</div>
+      </div>
+    </div>
+
+    <!-- TRANSMISSION -->
+    <div class="cp-section">
+      <div class="cp-heading">Transmission</div>
+      <button class="bcast-btn btn-testcard" id="btn-testcard" onclick="showLayer('testcard')">
+        <span class="bi"></span> Test Card F
+      </button>
+      <button class="bcast-btn btn-fault" id="btn-fault" onclick="showLayer('fault')">
+        <span class="bi"></span> We Are Sorry For The Temporary Fault
+      </button>
+      <button class="bcast-btn btn-suspended" id="btn-suspended" onclick="showLayer('suspended')">
+        <span class="bi"></span> Normal Programming Has Been Suspended
+      </button>
+      <button class="bcast-btn btn-ident" id="btn-ident" onclick="showLayer('ident')">
+        <span class="bi"></span> SWG-TV Ident
+      </button>
+    </div>
+
+    <!-- VIDEO -->
+    <div class="cp-section">
+      <div class="cp-heading">Video Playback</div>
+      <label class="upload-label" for="vid-upload">
+        <input type="file" id="vid-upload" accept="video/*" onchange="handleUpload(event)">
+        <div class="ul-icon">⬆</div>
+        <div class="ul-text">Upload video file<br><b>MP4 · WebM · MOV</b></div>
+      </label>
+      <div class="file-chip" id="file-chip"></div>
+      <button class="bcast-btn btn-video" id="btn-video" onclick="showLayer('video')" disabled style="opacity:0.45">
+        <span class="bi"></span> Play Uploaded Video
+      </button>
+    </div>
+
+    <!-- STATUS -->
+    <div class="cp-section">
+      <div class="cp-heading">Status</div>
+      <div class="info-row"><span class="ir-label">Signal</span><span class="ir-val green" id="st-signal">Active</span></div>
+      <div class="info-row"><span class="ir-label">Stream</span><span class="ir-val" id="st-stream" style="color:#555">Offline</span></div>
+      <div class="info-row"><span class="ir-label">Viewers</span><span class="ir-val" id="st-viewers">0</span></div>
+      <div class="info-row"><span class="ir-label">Output</span><span class="ir-val" id="st-output">Standby</span></div>
+      <div class="info-row"><span class="ir-label">Fade</span><span class="ir-val amber">1.2s Dissolve</span></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ── PEER / STREAM ──
+let peer = null;
+let peers = {};
+let isLive = false;
+let myRoomId = null;
+let captureStream = null;
+let viewerCount = 0;
+
+// ── STATE ──
+let currentLayer = null;
+let videoObjectURL = null;
+let identRaf = null;
+let identRunning = false;
+
+const video = document.getElementById('main-video');
+
+const LAYERS = {
+  testcard: document.getElementById('testcard-layer'),
+  fault: document.getElementById('fault-layer'),
+  suspended: document.getElementById('suspended-layer'),
+  ident: document.getElementById('ident-layer'),
+  video: document.getElementById('video-layer'),
+};
+const BTNS = {
+  testcard: document.getElementById('btn-testcard'),
+  fault: document.getElementById('btn-fault'),
+  suspended: document.getElementById('btn-suspended'),
+  ident: document.getElementById('btn-ident'),
+  video: document.getElementById('btn-video'),
+};
+
+// ── CLOCK ──
+setInterval(() => {
+  const n = new Date();
+  const p = v => String(v).padStart(2,'0');
+  const t = `${p(n.getHours())}:${p(n.getMinutes())}:${p(n.getSeconds())}`;
+  document.getElementById('clock').textContent = t;
+  document.getElementById('susp-time').textContent = t;
+}, 1000);
+
+// ── LAYER ──
+function showLayer(name) {
+  Object.values(BTNS).forEach(b => b.classList.remove('active'));
+
+  if (currentLayer === name) {
+    // toggle off
+    Object.values(LAYERS).forEach(l => l.classList.remove('visible'));
+    if (name !== 'video') video.pause();
+    if (name !== 'ident') stopIdent();
+    currentLayer = null;
+    setOutput('Standby');
+    document.getElementById('ms-dot').classList.remove('live');
+    return;
+  }
+
+  Object.values(LAYERS).forEach(l => l.classList.remove('visible'));
+  if (name !== 'video') video.pause();
+  if (name !== 'ident') stopIdent();
+
+  setTimeout(() => {
+    LAYERS[name].classList.add('visible');
+    BTNS[name].classList.add('active');
+    currentLayer = name;
+    if (name === 'video') video.play().catch(()=>{});
+    if (name === 'ident') startIdent();
+    const labels = {testcard:'Test Card F',fault:'Fault Notice',suspended:'Suspended',ident:'SWG-TV Ident',video:'Video Playback'};
+    setOutput(labels[name]);
+    document.getElementById('ms-dot').classList.add('live');
+  }, 80);
+}
+
+function setOutput(s) {
+  document.getElementById('current-label').textContent = s;
+  document.getElementById('st-output').textContent = s;
+}
+
+// ── VIDEO END → IDENT ──
+video.addEventListener('ended', () => {
+  showLayer('ident');
+});
+
+// ── UPLOAD ──
+function handleUpload(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (videoObjectURL) URL.revokeObjectURL(videoObjectURL);
+
+  if (currentLayer === 'video') {
+    Object.values(LAYERS).forEach(l => l.classList.remove('visible'));
+    video.pause();
+    BTNS.video.classList.remove('active');
+    currentLayer = null;
+  }
+
+  videoObjectURL = URL.createObjectURL(file);
+  video.src = videoObjectURL;
+  video.load();
+  video.currentTime = 0;
+  video.pause();
+
+  const chip = document.getElementById('file-chip');
+  chip.textContent = '▶ ' + file.name;
+  chip.classList.add('show');
+
+  const btn = document.getElementById('btn-video');
+  btn.disabled = false;
+  btn.style.opacity = '1';
+}
+
+// ── IDENT CANVAS ──
+function startIdent() {
+  if (identRunning) return;
+  identRunning = true;
+  const canvas = document.getElementById('ident-canvas');
+  const ctx = canvas.getContext('2d');
+  function resize() { canvas.width = canvas.offsetWidth; canvas.height = canvas.offsetHeight; }
+  resize();
+
+  const stars = Array.from({length:180}, () => ({
+    x: Math.random(), y: Math.random(),
+    r: Math.random()*1.2+0.2,
+    twinkle: Math.random()*Math.PI*2,
+  }));
+
+  let t = 0;
+  function draw() {
+    if (!identRunning) return;
+    const W = canvas.width, H = canvas.height;
+    t += 0.016;
+
+    ctx.fillStyle = '#000008';
+    ctx.fillRect(0,0,W,H);
+
+    // Stars
+    stars.forEach(s => {
+      const a = 0.35 + 0.35*Math.sin(s.twinkle + t*0.7);
+      ctx.beginPath();
+      ctx.arc(s.x*W, s.y*H, s.r, 0, Math.PI*2);
+      ctx.fillStyle = `rgba(210,220,255,${a})`;
+      ctx.fill();
+    });
+
+    const cx = W/2, cy = H*0.54;
+    const R = Math.min(W,H)*0.27;
+
+    // Glow
+    const gl = ctx.createRadialGradient(cx,cy,R*0.5,cx,cy,R*1.7);
+    gl.addColorStop(0,'rgba(20,60,180,0.3)');
+    gl.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.beginPath(); ctx.arc(cx,cy,R*1.7,0,Math.PI*2);
+    ctx.fillStyle = gl; ctx.fill();
+
+    // Ocean
+    const eg = ctx.createRadialGradient(cx-R*0.3,cy-R*0.3,0,cx,cy,R);
+    eg.addColorStop(0,'#2a7fd4'); eg.addColorStop(0.55,'#1755a0'); eg.addColorStop(1,'#0c2a58');
+    ctx.beginPath(); ctx.arc(cx,cy,R,0,Math.PI*2);
+    ctx.fillStyle = eg; ctx.fill();
+
+    // Landmasses
+    ctx.save(); ctx.beginPath(); ctx.arc(cx,cy,R,0,Math.PI*2); ctx.clip();
+    const rot = t*0.035;
+    [
+      [0.05+Math.sin(rot)*0.38,-0.22,0.32,0.42,0.3],
+      [-0.32+Math.sin(rot+1)*0.28,0.05,0.26,0.52,-0.2],
+      [0.18+Math.cos(rot*0.7)*0.28,0.22,0.42,0.30,0.5],
+      [-0.08+Math.sin(rot*0.5+2)*0.22,-0.42,0.16,0.20,0.1],
+      [0.32+Math.cos(rot*0.9)*0.18,-0.08,0.18,0.34,-0.4],
+    ].forEach(([rx,ry,rw,rh,a]) => {
+      ctx.save(); ctx.translate(cx+rx*R, cy+ry*R); ctx.rotate(a);
+      const cg = ctx.createRadialGradient(0,0,0,0,0,rw*R);
+      cg.addColorStop(0,'rgba(55,150,55,0.92)'); cg.addColorStop(0.65,'rgba(35,110,35,0.7)'); cg.addColorStop(1,'rgba(25,80,25,0)');
+      ctx.beginPath(); ctx.ellipse(0,0,rw*R,rh*R,0,0,Math.PI*2);
+      ctx.fillStyle = cg; ctx.fill(); ctx.restore();
+    });
+    // Polar ice
+    const ice = ctx.createRadialGradient(cx,cy-R,0,cx,cy-R,R*0.42);
+    ice.addColorStop(0,'rgba(220,235,255,0.95)'); ice.addColorStop(1,'rgba(200,225,255,0)');
+    ctx.beginPath(); ctx.ellipse(cx,cy-R,R*0.35,R*0.16,0,0,Math.PI*2);
+    ctx.fillStyle=ice; ctx.fill();
+    ctx.restore();
+
+    // Atmosphere
+    const atm = ctx.createRadialGradient(cx,cy,R*0.93,cx,cy,R*1.09);
+    atm.addColorStop(0,'rgba(70,150,255,0)');
+    atm.addColorStop(0.5,'rgba(70,150,255,0.22)');
+    atm.addColorStop(1,'rgba(70,150,255,0)');
+    ctx.beginPath(); ctx.arc(cx,cy,R*1.09,0,Math.PI*2); ctx.fillStyle=atm; ctx.fill();
+
+    // Specular
+    const sp = ctx.createRadialGradient(cx-R*0.3,cy-R*0.3,0,cx-R*0.3,cy-R*0.3,R*0.55);
+    sp.addColorStop(0,'rgba(255,255,255,0.18)'); sp.addColorStop(1,'rgba(255,255,255,0)');
+    ctx.beginPath(); ctx.arc(cx,cy,R,0,Math.PI*2); ctx.fillStyle=sp; ctx.fill();
+
+    // Title
+    const titleY = H*0.13;
+    const fs = Math.min(W*0.105, H*0.13, 88);
+    const pulse = 0.88+0.12*Math.sin(t*1.4);
+    ctx.save();
+    ctx.shadowColor='rgba(50,120,255,0.8)'; ctx.shadowBlur=30;
+    ctx.font=`700 ${fs}px 'Source Serif 4', Georgia, serif`;
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.globalAlpha=pulse;
+    ctx.fillStyle='#ffffff';
+    ctx.fillText('SWG-TV', W/2, titleY);
+    ctx.restore();
+
+    // Underbar
+    const bw=fs*3.1, by=titleY+fs*0.63;
+    const bg2=ctx.createLinearGradient(W/2-bw/2,0,W/2+bw/2,0);
+    bg2.addColorStop(0,'rgba(255,255,255,0)');
+    bg2.addColorStop(0.5,`rgba(255,255,255,${0.45*pulse})`);
+    bg2.addColorStop(1,'rgba(255,255,255,0)');
+    ctx.fillStyle=bg2; ctx.fillRect(W/2-bw/2,by,bw,1.5);
+
+    // Subtitle
+    const subfs=Math.max(fs*0.17,9);
+    ctx.font=`400 ${subfs}px 'DM Sans', Helvetica, sans-serif`;
+    ctx.fillStyle=`rgba(140,175,255,${0.55*pulse})`;
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('BROADCASTING TO THE WORLD', W/2, by+subfs*1.7);
+
+    identRaf = requestAnimationFrame(draw);
+  }
+  draw();
+}
+
+function stopIdent() {
+  identRunning = false;
+  if (identRaf) { cancelAnimationFrame(identRaf); identRaf = null; }
+}
+
+// ── PEER.JS LIVE ──
+async function toggleLive() {
+  if (isLive) {
+    stopLive();
+    return;
+  }
+
+  const btn = document.getElementById('btn-golive');
+  btn.textContent = 'Connecting…';
+  btn.disabled = true;
+
+  // Capture the output stage as a stream
+  const stage = document.getElementById('output-stage');
+  try {
+    captureStream = stage.captureStream(30);
+  } catch(e) {
+    alert('Could not capture stream. Make sure you\'re using Chrome or Edge.');
+    btn.textContent = '● Go Live';
+    btn.disabled = false;
+    return;
+  }
+
+  peer = new Peer(undefined, {
+    host: '0.peerjs.com',
+    port: 443,
+    secure: true,
+    path: '/',
+    debug: 0,
+  });
+
+  peer.on('open', id => {
+    myRoomId = id;
+    isLive = true;
+    btn.textContent = '■ Stop Broadcast';
+    btn.classList.add('live');
+    btn.disabled = false;
+
+    document.getElementById('room-id-text').textContent = id;
+    document.getElementById('room-display').classList.add('show');
+    document.getElementById('live-badge').classList.add('show');
+    document.getElementById('st-stream').textContent = 'Live';
+    document.getElementById('st-stream').style.color = '#bb1919';
+  });
+
+  peer.on('call', call => {
+    call.answer(captureStream);
+    peers[call.peer] = call;
+    viewerCount++;
+    updateViewers();
+
+    call.on('close', () => {
+      delete peers[call.peer];
+      viewerCount = Math.max(0, viewerCount-1);
+      updateViewers();
+    });
+    call.on('error', () => {
+      delete peers[call.peer];
+      viewerCount = Math.max(0, viewerCount-1);
+      updateViewers();
+    });
+  });
+
+  peer.on('error', err => {
+    console.error('PeerJS error:', err);
+  });
+}
+
+function stopLive() {
+  if (peer) { peer.destroy(); peer = null; }
+  captureStream = null;
+  isLive = false;
+  myRoomId = null;
+  Object.values(peers).forEach(c => c.close());
+  peers = {};
+  viewerCount = 0;
+  updateViewers();
+
+  const btn = document.getElementById('btn-golive');
+  btn.innerHTML = '<span>&#9679;</span> Go Live';
+  btn.classList.remove('live');
+  btn.disabled = false;
+  document.getElementById('room-display').classList.remove('show');
+  document.getElementById('live-badge').classList.remove('show');
+  document.getElementById('st-stream').textContent = 'Offline';
+  document.getElementById('st-stream').style.color = '#555';
+}
+
+function updateViewers() {
+  document.getElementById('viewer-num').textContent = viewerCount;
+  document.getElementById('st-viewers').textContent = viewerCount;
+}
+
+function copyRoomId() {
+  if (!myRoomId) return;
+  const url = `${window.location.origin}/viewer.html?room=${myRoomId}`;
+  navigator.clipboard.writeText(url).then(() => {
+    const btn = document.querySelector('.copy-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = 'Copy viewer link'; }, 2000);
+  }).catch(() => {
+    // fallback
+    prompt('Share this link with viewers:', `${window.location.origin}/viewer.html?room=${myRoomId}`);
+  });
+}
+
+// Boot: show test card
+window.addEventListener('load', () => setTimeout(() => showLayer('testcard'), 300));
+</script>
+</body>
+</html>
